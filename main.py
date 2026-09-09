@@ -13,9 +13,9 @@ from database import (
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.ERROR)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-SUPPORT_ID = 14678899 #ایدی عددی ادمین
-SUPPORT_USERNAME = "یوزرنیم ادمین"
-CHANNEL_ID = "یوزرنیم جویگن اجباری"
+SUPPORT_ID = 8904869158 #ایدی عددی ادمین
+SUPPORT_USERNAME = "par3aYT"
+CHANNEL_ID = "PreEmoji_Free"
 CHANNEL_PRICE = 15000 #مبلغ ماهنه 
 
 
