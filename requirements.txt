@@ -1,5 +1,0 @@
-python-telegram-bot[webhooks]==22.8
-psycopg[binary]
-flask
-
-Telethon==1.44.0
