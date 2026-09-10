@@ -23,7 +23,8 @@ from telethon import TelegramClient
 
 from database import (
     init_db, create_or_update_user, get_balance, get_user_channels,
-    register_referral, get_referral_stats,
+    register_referral, get_referral_stats, get_subscription_expiry,
+    has_active_subscription, buy_month_subscription,
     channel_exists, register_channel, create_receipt,
     get_receipt, set_receipt_status, get_receipt_status, approve_receipt
 )
@@ -78,7 +79,8 @@ def create_join_keyboard():
 def create_main_keyboard():
     keyboard = {
         "inline_keyboard": [
-            [{"text": "انتخاب کانال", "callback_data": "select_channel", "style": "primary", "icon_custom_emoji_id": "5105062921902229396"}],
+            [{"text": "تبدیل ایموجی", "callback_data": "convert_emoji", "style": "primary", "icon_custom_emoji_id": "5105062921902229396"}],
+            [{"text": "خرید اکانت یک ماهه", "callback_data": "buy_account", "style": "success", "icon_custom_emoji_id": "5105285714740774968"}],
             [
                 {"text": "افزایش موجودی", "callback_data": "increase_balance", "style": "success", "icon_custom_emoji_id": "5105285714740774968"},
                 {"text": "راهنما ربات", "callback_data": "help", "style": "danger", "icon_custom_emoji_id": "5105130477442827969"}
@@ -287,6 +289,45 @@ async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         not_joined_text = f'<b>[6257971296794057056] شما هنوز در کانال عضو نشدید!</b>\n\n<b>لطفاً ابتدا روی دکمه "عضویت در کانال" کلیک کنید و عضو شوید</b>\n<b>سپس دکمه "بررسی عضویت" را بزنید.</b>'
         final_text = replace_emoji_ids(not_joined_text)
         await query.edit_message_text(final_text, parse_mode="HTML", reply_markup=create_join_keyboard(), disable_web_page_preview=True)
+
+async def show_convert_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user if update.effective_user else update.callback_query.from_user
+    if user.id != SUPPORT_ID and not await check_user_joined(user.id, context):
+        await show_join_message(update, context)
+        return
+    if not has_active_subscription(user.id):
+        text = '[5922608666795580060] ههههههه موجودی نداری [5922608666795580060] [5922608666795580060] [5922608666795580060] [5922608666795580060]\n\nبرای استفاده از تبدیل ایموجی باید اکانت یک ماهه به مبلغ 15 هزار تومان داشته باشی. اول موجودی رو افزایش بده و بعد اکانت یک ماهه بخر. [5922608666795580060]'
+        final = replace_emoji_ids(text)
+        markup = InlineKeyboardMarkup.de_json({"inline_keyboard":[[{"text":"خرید اکانت یک ماهه","callback_data":"buy_account","style":"success"}],[{"text":"بازگشت","callback_data":"back_main","style":"danger"}]]}, None)
+    else:
+        text = 'برای دریافت ایموجی پرمیوم از کانال @CustomEmojiPack ایدی ایموجی رو کپی کنید همراه با متن ارسال کنید. 😎'
+        final = replace_emoji_ids(text)
+        markup = create_back_keyboard()
+        context.user_data['waiting_for_emoji'] = True
+    if update.callback_query:
+        await update.callback_query.edit_message_text(final, parse_mode="HTML", reply_markup=markup)
+        await update.callback_query.answer()
+    else:
+        await update.message.reply_text(final, parse_mode="HTML", reply_markup=markup)
+
+async def buy_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    if has_active_subscription(user.id):
+        expiry = get_subscription_expiry(user.id)
+        await query.edit_message_text(f'✅ اکانت شما فعال است.\nتا تاریخ: <b>{expiry:%Y-%m-%d %H:%M}</b>', parse_mode="HTML", reply_markup=create_back_keyboard())
+        return
+    expiry = buy_month_subscription(user.id, CHANNEL_PRICE)
+    if expiry is None:
+        text = '[5922608666795580060] ههههههه موجودی نداری [5922608666795580060] [5922608666795580060] [5922608666795580060] [5922608666795580060]\n\nبرای خرید اکانت یک ماهه 15 هزار تومان موجودی لازم داری. اول موجودی رو افزایش بده بعد اکانت رو بخر. [5922608666795580060]'
+        markup = InlineKeyboardMarkup.de_json({"inline_keyboard":[[{"text":"افزایش موجودی","callback_data":"increase_balance","style":"success"}],[{"text":"بازگشت","callback_data":"back_main","style":"danger"}]]}, None)
+    else:
+        text = '✅ اکانت یک ماهه با موفقیت فعال شد.\n\nبرای دریافت ایموجی پرمیوم از کانال @CustomEmojiPack ایدی ایموجی رو کپی کنید همراه با متن ارسال کنید. 😎'
+        markup = create_back_keyboard()
+        context.user_data['waiting_for_emoji'] = True
+    final = replace_emoji_ids(text)
+    await query.edit_message_text(final, parse_mode="HTML", reply_markup=markup)
 
 async def show_select_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user if update.effective_user else update.callback_query.from_user
@@ -743,12 +784,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         if query.data == "check_join":
             await check_join(update, context)
-        elif query.data == "select_channel":
-            await show_select_channel(update, context)
+        elif query.data == "select_channel" or query.data == "convert_emoji":
+            await show_convert_emoji(update, context)
         elif query.data == "register_channel":
-            await register_channel_start(update, context)
+            await show_convert_emoji(update, context)
+        elif query.data == "buy_account":
+            await buy_account(update, context)
         elif query.data == "back_select_channel":
-            await show_select_channel(update, context)
+            await show_convert_emoji(update, context)
         elif query.data.startswith("channel_"):
             channel = query.data.replace("channel_", "")
             selected_text = f'[5210783786706436474] کانال مورد نظر انتخاب شد[5213222108359849454]\n@{channel} [5213157559296358731]\n\nبرای ارسال پست از کانال @CustomEmojiPack ایدی ایموجیو کپی کنید همراه با متن ارسال کنید. [5321529789016740670]'
@@ -844,23 +887,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if context.user_data.get('waiting_for_channel'):
             await handle_channel_registration(update, context)
             return
-        if context.user_data.get('waiting_for_post'):
-            channel = context.user_data.get('selected_channel')
-            if channel:
-                try:
-                    final_text = replace_emoji_ids(update.message.text)
-                    await send_post_via_private_forward(
-                        update, context, channel, final_text
-                    )
-                    confirm_post = f'[5105062921902229396] <b>پیام شما با موفقیت به کانال {channel} ارسال شد!</b>'
-                    final_confirm = replace_emoji_ids(confirm_post)
-                    await update.message.reply_text(final_confirm, parse_mode="HTML")
-                    context.user_data['waiting_for_post'] = False
-                    context.user_data['selected_channel'] = None
-                    await show_select_channel(update, context)
-                except:
-                    await update.message.reply_text("❌ خطا در ارسال پیام به کانال! لطفاً مطمئن شوید ربات در کانال ادمین است.", parse_mode="HTML")
+        if context.user_data.get('waiting_for_emoji'):
+            if not has_active_subscription(user.id):
+                context.user_data['waiting_for_emoji'] = False
+                await show_convert_emoji(update, context)
                 return
+            try:
+                final_text = replace_emoji_ids(update.message.text or '')
+                await update.message.reply_text(final_text, parse_mode="HTML")
+            except:
+                await update.message.reply_text("❌ خطا در تبدیل ایموجی.", parse_mode="HTML")
+            return
         if context.user_data.get('waiting_for_receipt'):
             if update.message.photo:
                 await handle_receipt(update, context)

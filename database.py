@@ -85,6 +85,15 @@ def init_db():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_receipts_status ON receipts(status)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_referrals_referrer_id ON referrals(referrer_id)")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+
 
 
 def create_or_update_user(user_id, username=None, first_name=None):
@@ -307,3 +316,42 @@ def get_referral_stats(user_id):
             """, (user_id,))
             count, earned = cur.fetchone()
             return int(count), int(earned)
+
+
+def get_subscription_expiry(user_id):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT expires_at FROM subscriptions WHERE user_id=%s", (user_id,))
+            row = cur.fetchone()
+            return row[0] if row else None
+
+def has_active_subscription(user_id):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM subscriptions WHERE user_id=%s AND expires_at > NOW()", (user_id,))
+            return cur.fetchone() is not None
+
+def buy_month_subscription(user_id, price=15000):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT balance FROM users WHERE user_id=%s FOR UPDATE", (user_id,))
+            row = cur.fetchone()
+            if not row or row[0] < price:
+                return None
+            cur.execute("SELECT expires_at FROM subscriptions WHERE user_id=%s FOR UPDATE", (user_id,))
+            existing = cur.fetchone()
+            if existing and existing[0] > __import__('datetime').datetime.now(__import__('datetime').timezone.utc):
+                return existing[0]
+            cur.execute("UPDATE users SET balance=balance-%s, updated_at=NOW() WHERE user_id=%s", (price, user_id))
+            cur.execute("""
+                INSERT INTO subscriptions(user_id, expires_at)
+                VALUES (%s, NOW() + INTERVAL '30 days')
+                ON CONFLICT (user_id) DO UPDATE SET expires_at=NOW() + INTERVAL '30 days', updated_at=NOW()
+                RETURNING expires_at
+            """, (user_id,))
+            expiry = cur.fetchone()[0]
+            cur.execute("""
+                INSERT INTO transactions(user_id, amount, transaction_type, description)
+                VALUES (%s, %s, 'subscription_purchase', 'خرید اکانت یک ماهه')
+            """, (user_id, -price))
+            return expiry
