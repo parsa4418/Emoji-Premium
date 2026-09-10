@@ -1,0 +1,5 @@
+python-telegram-bot
+psycopg[binary]
+flask
+
+Telethon==1.44.0
